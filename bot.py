@@ -91,20 +91,28 @@ nota: No se pueden obtener más datos en M3U
         if user.get("is_trial") == "1":
             tipo_linea = "Trial"
 
-        respuesta = f"""
-📡 INFORMACIÓN DE LA CUENTA
+        # Formatear fechas bonito (dd/mm/yyyy)
+def fecha_bonita(timestamp):
+    try:
+        return datetime.fromtimestamp(int(timestamp)).strftime('%d/%m/%Y')
+    except:
+        return "N/A"
+
+respuesta = f"""
+INFORMACION DE LA CUENTA
 ──────────────────────────
-servidor: {servidor}
-puerto: {puerto}
-usuario: {usuario}
-contraseña: {contraseña}
-estado: {estado}
-tipo_linea: {tipo_linea}
-fecha_inicio: {convertir_fecha(user.get('created_at'))}
-expiracion: {convertir_fecha(user.get('exp_date'))}
-conex_permitidas: {user.get('max_connections')}
-conex_activas: {user.get('active_cons')}
-hora_servidor: {server.get('time_now')}
+servidor:           {servidor.replace('http://','').replace('https://','')}
+puerto:             {puerto}
+usuario:            {usuario}
+contraseña:         {contraseña}
+estado:             {estado}
+tipo_linea:         {tipo_linea if tipo_linea else "N/A"}
+fecha_inicio:       {fecha_bonita(user.get('created_at'))}
+expiracion:         {fecha_bonita(user.get('exp_date'))}
+conex_permitidas:   {user.get('max_connections')}
+conex_activas:      {user.get('active_cons')}
+hora_servidor:      {server.get('time_now')}
+──────────────────────────
 """
 
         await update.message.reply_text(respuesta)
