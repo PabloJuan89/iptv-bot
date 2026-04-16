@@ -14,15 +14,26 @@ def fecha_bonita(timestamp):
     except:
         return "N/A"
 
-def limpiar_servidor(url):
-    return url.replace("http://", "").replace("https://", "")
+# 🔥 DETECCIÓN REAL DE PROTOCOLO
+def detectar_protocolo(servidor, puerto):
+    try:
+        url_https = f"https://{servidor}:{puerto}"
+        r = requests.get(url_https, timeout=5, verify=False)
+        if r.status_code < 500:
+            return "https"
+    except:
+        pass
 
-# -------- EXTRAER Y CONSULTAR -------- #
+    return "http"
+
+# -------- CONSULTA API -------- #
 
 def obtener_datos(servidor, puerto, usuario, contraseña):
     try:
-        url = f"http://{servidor}:{puerto}/player_api.php?username={usuario}&password={contraseña}"
-        r = requests.get(url, timeout=10)
+        protocolo = detectar_protocolo(servidor, puerto)
+
+        url = f"{protocolo}://{servidor}:{puerto}/player_api.php?username={usuario}&password={contraseña}"
+        r = requests.get(url, timeout=10, verify=False)
 
         if r.status_code != 200:
             return "❌ Servidor no responde"
@@ -44,7 +55,7 @@ def obtener_datos(servidor, puerto, usuario, contraseña):
         return f"""
 INFORMACION DE LA CUENTA
 ──────────────────────────
-servidor:           {servidor}
+servidor:           {protocolo}://{servidor}
 puerto:             {puerto}
 usuario:            {usuario}
 contraseña:         {contraseña}
@@ -92,9 +103,7 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
 
-    # =========================
-    # 🔵 M3U → CONVERTIR A XTREAM
-    # =========================
+    # 🔵 M3U → EXTRAER + CONSULTAR
     if texto.startswith("http") and "m3u" in texto:
         try:
             parsed = urlparse(texto)
@@ -117,9 +126,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # =========================
     # 🔴 XTREAM DIRECTO
-    # =========================
     try:
         lineas = texto.split("\n")
         datos = {}
@@ -129,7 +136,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 clave, valor = linea.split(":", 1)
                 datos[clave.strip().lower()] = valor.strip()
 
-        servidor = limpiar_servidor(datos.get("servidor", ""))
+        servidor = datos.get("servidor", "").replace("http://", "").replace("https://", "")
         puerto = datos.get("puerto")
         usuario = datos.get("usuario")
         contraseña = datos.get("contraseña")
@@ -152,5 +159,5 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(botones))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check))
 
-print("🔥 BOT IPTV PRO ACTIVO 🔥")
+print("🔥 BOT IPTV PRO MAX ACTIVO 🔥")
 app.run_polling()
