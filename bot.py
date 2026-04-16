@@ -6,6 +6,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 
 TOKEN = "8559219862:AAHERppsEHKsWkFFayYG5Zta8R-ISd8TXHU"
 
+# 🔐 límite simple
+user_limit = {}
+
 # -------- FUNCIONES -------- #
 
 def fecha_bonita(timestamp):
@@ -14,43 +17,33 @@ def fecha_bonita(timestamp):
     except:
         return "N/A"
 
-# 🔥 DETECCIÓN REAL DE PROTOCOLO
 def detectar_protocolo(servidor, puerto):
     try:
-        url_https = f"https://{servidor}:{puerto}"
-        r = requests.get(url_https, timeout=5, verify=False)
-        if r.status_code < 500:
+        if requests.get(f"https://{servidor}:{puerto}", timeout=5, verify=False).status_code < 500:
             return "https"
     except:
         pass
-
     return "http"
-
-# -------- CONSULTA API -------- #
 
 def obtener_datos(servidor, puerto, usuario, contraseña):
     try:
         protocolo = detectar_protocolo(servidor, puerto)
-
         url = f"{protocolo}://{servidor}:{puerto}/player_api.php?username={usuario}&password={contraseña}"
-        r = requests.get(url, timeout=10, verify=False)
 
+        r = requests.get(url, timeout=10, verify=False)
         if r.status_code != 200:
             return "❌ Servidor no responde"
 
         data = r.json()
-
         if "user_info" not in data:
             return "❌ Cuenta inválida"
 
         user = data.get("user_info", {})
         server = data.get("server_info", {})
 
-        estado = user.get("status", "N/A")
-
-        tipo_linea = "Premium"
+        tipo = "Premium"
         if user.get("is_trial") == "1":
-            tipo_linea = "Trial"
+            tipo = "Trial"
 
         return f"""
 INFORMACION DE LA CUENTA
@@ -59,8 +52,8 @@ servidor:           {protocolo}://{servidor}
 puerto:             {puerto}
 usuario:            {usuario}
 contraseña:         {contraseña}
-estado:             {estado}
-tipo_linea:         {tipo_linea}
+estado:             {user.get('status')}
+tipo_linea:         {tipo}
 fecha_inicio:       {fecha_bonita(user.get('created_at'))}
 expiracion:         {fecha_bonita(user.get('exp_date'))}
 conex_permitidas:   {user.get('max_connections')}
@@ -68,88 +61,87 @@ conex_activas:      {user.get('active_cons')}
 hora_servidor:      {server.get('time_now')}
 ──────────────────────────
 """
-
     except:
-        return "❌ Error consultando servidor"
+        return "❌ Error"
 
 # -------- START -------- #
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     botones = [[InlineKeyboardButton("📡 Verificar IPTV", callback_data="check")]]
-    teclado = InlineKeyboardMarkup(botones)
-
-    await update.message.reply_text(
-        "📺 BOT IPTV PRO\n\nEnvía:\n✔ Datos Xtream\n✔ Link M3U",
-        reply_markup=teclado
-    )
+    await update.message.reply_text("📺 BOT IPTV PRO MAX++", reply_markup=InlineKeyboardMarkup(botones))
 
 # -------- BOTONES -------- #
 
 async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    await query.message.reply_text(
-        "Formato Xtream:\n\n"
-        "servidor: http://example.com\n"
-        "puerto: 8080\n"
-        "usuario: user\n"
-        "contraseña: pass\n\n"
-        "O envía un link M3U"
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text(
+        "Envía:\n- Datos Xtream\n- Uno o varios links M3U"
     )
 
 # -------- CHECK -------- #
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = update.message.text.strip()
+    user_id = update.message.from_user.id
 
-    # 🔵 M3U → EXTRAER + CONSULTAR
-    if texto.startswith("http") and "m3u" in texto:
-        try:
-            parsed = urlparse(texto)
-            query = parse_qs(parsed.query)
-
-            servidor = parsed.hostname
-            puerto = parsed.port if parsed.port else "80"
-            usuario = query.get("username", [None])[0]
-            contraseña = query.get("password", [None])[0]
-
-            if not usuario or not contraseña:
-                await update.message.reply_text("❌ M3U inválido")
-                return
-
-            resultado = obtener_datos(servidor, puerto, usuario, contraseña)
-            await update.message.reply_text(resultado)
-
-        except:
-            await update.message.reply_text("❌ Error procesando M3U")
-
+    # 🔐 límite simple
+    user_limit[user_id] = user_limit.get(user_id, 0) + 1
+    if user_limit[user_id] > 20:
+        await update.message.reply_text("🚫 Límite alcanzado")
         return
 
-    # 🔴 XTREAM DIRECTO
-    try:
-        lineas = texto.split("\n")
-        datos = {}
+    texto = update.message.text.strip().split("\n")
 
-        for linea in lineas:
-            if ":" in linea:
-                clave, valor = linea.split(":", 1)
-                datos[clave.strip().lower()] = valor.strip()
+    resultados = []
 
-        servidor = datos.get("servidor", "").replace("http://", "").replace("https://", "")
-        puerto = datos.get("puerto")
-        usuario = datos.get("usuario")
-        contraseña = datos.get("contraseña")
+    for linea in texto:
+        linea = linea.strip()
 
-        if not all([servidor, puerto, usuario, contraseña]):
-            await update.message.reply_text("❌ Datos incompletos")
-            return
+        # 🔵 M3U
+        if linea.startswith("http") and "m3u" in linea:
+            try:
+                parsed = urlparse(linea)
+                query = parse_qs(parsed.query)
 
-        resultado = obtener_datos(servidor, puerto, usuario, contraseña)
-        await update.message.reply_text(resultado)
+                servidor = parsed.hostname
+                puerto = parsed.port or "80"
+                usuario = query.get("username", [None])[0]
+                contraseña = query.get("password", [None])[0]
 
-    except:
-        await update.message.reply_text("❌ Error en formato")
+                if usuario and contraseña:
+                    resultados.append(obtener_datos(servidor, puerto, usuario, contraseña))
+                else:
+                    resultados.append("❌ M3U inválido")
+
+            except:
+                resultados.append("❌ Error M3U")
+
+        # 🔴 XTREAM
+        elif "servidor:" in linea:
+            try:
+                datos = {}
+                for l in texto:
+                    if ":" in l:
+                        k, v = l.split(":", 1)
+                        datos[k.strip().lower()] = v.strip()
+
+                servidor = datos.get("servidor", "").replace("http://", "").replace("https://", "")
+                puerto = datos.get("puerto")
+                usuario = datos.get("usuario")
+                contraseña = datos.get("contraseña")
+
+                resultados.append(obtener_datos(servidor, puerto, usuario, contraseña))
+                break
+
+            except:
+                resultados.append("❌ Error Xtream")
+
+    if not resultados:
+        await update.message.reply_text("⚠️ No se detectaron datos")
+        return
+
+    # 🔥 enviar resultados
+    for r in resultados:
+        await update.message.reply_text(r)
 
 # -------- MAIN -------- #
 
@@ -159,5 +151,5 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(botones))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check))
 
-print("🔥 BOT IPTV PRO MAX ACTIVO 🔥")
+print("🔥 BOT IPTV PRO MAX++ ACTIVO 🔥")
 app.run_polling()
