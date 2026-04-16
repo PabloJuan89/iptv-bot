@@ -1,18 +1,35 @@
 import requests
 import asyncio
+import sqlite3
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = "8559219862:AAHERppsEHKsWkFFayYG5Zta8R-ISd8TXHU"
+ADMIN_ID = 1044482533  # 🔥 TU ID
 
-# 🔐 CONFIG
-ADMIN_ID = 1044482533  # 🔥 CAMBIA ESTO
-VIP_USERS = {ADMIN_ID}
+# -------- BASE DE DATOS -------- #
 
-# 🚫 anti spam
-user_requests = {}
+conn = sqlite3.connect("bot.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    is_vip INTEGER DEFAULT 0
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    fecha TEXT
+)
+""")
+
+conn.commit()
 
 # -------- FUNCIONES -------- #
 
@@ -30,7 +47,7 @@ def detectar_protocolo(servidor, puerto):
         pass
     return "http"
 
-async def obtener_datos_async(servidor, puerto, usuario, contraseña):
+async def obtener_datos(servidor, puerto, usuario, contraseña):
     try:
         protocolo = detectar_protocolo(servidor, puerto)
         url = f"{protocolo}://{servidor}:{puerto}/player_api.php?username={usuario}&password={contraseña}"
@@ -65,93 +82,62 @@ hora_servidor:      {server.get('time_now')}
     except:
         return "❌ Error"
 
-# -------- START -------- #
+# -------- USUARIOS -------- #
+
+def es_vip(user_id):
+    cursor.execute("SELECT is_vip FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    return row and row[0] == 1
+
+def registrar_usuario(user_id):
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+
+# -------- COMANDOS -------- #
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💀 BOT IPTV NIVEL DIOS")
+    user_id = update.message.from_user.id
+    registrar_usuario(user_id)
 
-# -------- ADMIN -------- #
+    await update.message.reply_text("🏢 BOT IPTV EMPRESA\nSolicita acceso VIP")
 
-async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def addvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
         return
 
-    try:
-        uid = int(context.args[0])
-        VIP_USERS.add(uid)
-        await update.message.reply_text(f"✅ Usuario {uid} agregado VIP")
-    except:
-        await update.message.reply_text("❌ Uso: /addvip ID")
+    uid = int(context.args[0])
+    cursor.execute("UPDATE users SET is_vip=1 WHERE user_id=?", (uid,))
+    conn.commit()
+
+    await update.message.reply_text(f"✅ {uid} ahora es VIP")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
         return
 
-    await update.message.reply_text(f"📊 Usuarios activos: {len(user_requests)}")
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM logs")
+    checks = cursor.fetchone()[0]
+
+    await update.message.reply_text(f"📊 Usuarios: {users}\nChecks: {checks}")
 
 # -------- CHECK -------- #
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
 
-    # 🔐 acceso VIP
-    if user_id not in VIP_USERS:
-        await update.message.reply_text("🚫 No autorizado")
+    if not es_vip(user_id):
+        await update.message.reply_text("🚫 Solo VIP")
         return
 
-    # 🚫 anti spam
-    now = datetime.now().timestamp()
-    user_requests[user_id] = [t for t in user_requests.get(user_id, []) if now - t < 60]
-
-    if len(user_requests[user_id]) > 10:
-        await update.message.reply_text("⏳ Espera un momento")
-        return
-
-    user_requests[user_id].append(now)
-
-    texto = update.message.text.strip().split("\n")
+    texto = update.message.text.split("\n")
     tareas = []
 
     for linea in texto:
         if linea.startswith("http") and "m3u" in linea:
-            try:
-                parsed = urlparse(linea)
-                query = parse_qs(parsed.query)
-
-                servidor = parsed.hostname
-                puerto = parsed.port or "80"
-                usuario = query.get("username", [None])[0]
-                contraseña = query.get("password", [None])[0]
-
-                if usuario and contraseña:
-                    tareas.append(obtener_datos_async(servidor, puerto, usuario, contraseña))
-            except:
-                pass
-
-    if not tareas:
-        await update.message.reply_text("⚠️ No se detectaron datos")
-        return
-
-    resultados = await asyncio.gather(*tareas)
-
-    for r in resultados:
-        await update.message.reply_text(r)
-
-# -------- ARCHIVOS M3U -------- #
-
-async def archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file = await update.message.document.get_file()
-    ruta = "lista.m3u"
-    await file.download_to_drive(ruta)
-
-    with open(ruta, "r", errors="ignore") as f:
-        lineas = f.readlines()
-
-    tareas = []
-
-    for l in lineas:
-        if "http" in l and "m3u" in l:
-            parsed = urlparse(l.strip())
+            parsed = urlparse(linea)
             query = parse_qs(parsed.query)
 
             servidor = parsed.hostname
@@ -160,22 +146,28 @@ async def archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             contraseña = query.get("password", [None])[0]
 
             if usuario and contraseña:
-                tareas.append(obtener_datos_async(servidor, puerto, usuario, contraseña))
+                tareas.append(obtener_datos(servidor, puerto, usuario, contraseña))
 
-    resultados = await asyncio.gather(*tareas[:20])
+    if not tareas:
+        await update.message.reply_text("⚠️ No válido")
+        return
+
+    resultados = await asyncio.gather(*tareas)
 
     for r in resultados:
         await update.message.reply_text(r)
+
+    cursor.execute("INSERT INTO logs (user_id, fecha) VALUES (?, ?)", (user_id, str(datetime.now())))
+    conn.commit()
 
 # -------- MAIN -------- #
 
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("addvip", add_vip))
+app.add_handler(CommandHandler("addvip", addvip))
 app.add_handler(CommandHandler("stats", stats))
-app.add_handler(MessageHandler(filters.Document.ALL, archivo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check))
 
-print("💀 BOT NIVEL DIOS ACTIVO 💀")
+print("🏢 BOT EMPRESA ACTIVO")
 app.run_polling()
