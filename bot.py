@@ -17,104 +17,20 @@ def fecha_bonita(timestamp):
 def limpiar_servidor(url):
     return url.replace("http://", "").replace("https://", "")
 
-# -------- START -------- #
+# -------- EXTRAER Y CONSULTAR -------- #
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    botones = [[InlineKeyboardButton("📡 Verificar IPTV", callback_data="check")]]
-    teclado = InlineKeyboardMarkup(botones)
-
-    await update.message.reply_text(
-        "📺 BOT CHECKER IPTV PRO\n\nPresiona el botón 👇",
-        reply_markup=teclado
-    )
-
-# -------- BOTONES -------- #
-
-async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    await query.message.reply_text(
-        "Envía datos Xtream:\n\n"
-        "servidor: http://example.com\n"
-        "puerto: 8080\n"
-        "usuario: user\n"
-        "contraseña: pass\n\n"
-        "O envía un link M3U"
-    )
-
-# -------- CHECK -------- #
-
-async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = update.message.text.strip()
-
-    # =========================
-    # 🔵 MODO M3U
-    # =========================
-    if texto.startswith("http") and "m3u" in texto:
-        try:
-            parsed = urlparse(texto)
-            query = parse_qs(parsed.query)
-
-            servidor = parsed.hostname or "N/A"
-            puerto = parsed.port or "80"
-            usuario = query.get("username", ["N/A"])[0]
-            contraseña = query.get("password", ["N/A"])[0]
-
-            respuesta = f"""
-INFORMACION DE LA CUENTA
-──────────────────────────
-servidor:           {servidor}
-puerto:             {puerto}
-usuario:            {usuario}
-contraseña:         {contraseña}
-estado:             N/A
-tipo_linea:         M3U
-fecha_inicio:       N/A
-expiracion:         N/A
-conex_permitidas:   N/A
-conex_activas:      N/A
-hora_servidor:      N/A
-──────────────────────────
-"""
-
-            await update.message.reply_text(respuesta)
-            return
-
-        except:
-            await update.message.reply_text("❌ Error al analizar M3U")
-            return
-
-    # =========================
-    # 🔴 MODO XTREAM
-    # =========================
+def obtener_datos(servidor, puerto, usuario, contraseña):
     try:
-        lineas = texto.split("\n")
-        datos = {}
-
-        for linea in lineas:
-            if ":" in linea:
-                clave, valor = linea.split(":", 1)
-                datos[clave.strip().lower()] = valor.strip()
-
-        servidor = datos.get("servidor")
-        puerto = datos.get("puerto")
-        usuario = datos.get("usuario")
-        contraseña = datos.get("contraseña")
-
-        if not all([servidor, puerto, usuario, contraseña]):
-            await update.message.reply_text("❌ Datos incompletos")
-            return
-
-        url = f"{servidor}:{puerto}/player_api.php?username={usuario}&password={contraseña}"
-
+        url = f"http://{servidor}:{puerto}/player_api.php?username={usuario}&password={contraseña}"
         r = requests.get(url, timeout=10)
 
         if r.status_code != 200:
-            await update.message.reply_text("❌ Servidor no responde")
-            return
+            return "❌ Servidor no responde"
 
         data = r.json()
+
+        if "user_info" not in data:
+            return "❌ Cuenta inválida"
 
         user = data.get("user_info", {})
         server = data.get("server_info", {})
@@ -125,10 +41,10 @@ hora_servidor:      N/A
         if user.get("is_trial") == "1":
             tipo_linea = "Trial"
 
-        respuesta = f"""
+        return f"""
 INFORMACION DE LA CUENTA
 ──────────────────────────
-servidor:           {limpiar_servidor(servidor)}
+servidor:           {servidor}
 puerto:             {puerto}
 usuario:            {usuario}
 contraseña:         {contraseña}
@@ -142,10 +58,91 @@ hora_servidor:      {server.get('time_now')}
 ──────────────────────────
 """
 
-        await update.message.reply_text(respuesta)
+    except:
+        return "❌ Error consultando servidor"
 
-    except Exception as e:
-        await update.message.reply_text("❌ Error en datos o formato")
+# -------- START -------- #
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    botones = [[InlineKeyboardButton("📡 Verificar IPTV", callback_data="check")]]
+    teclado = InlineKeyboardMarkup(botones)
+
+    await update.message.reply_text(
+        "📺 BOT IPTV PRO\n\nEnvía:\n✔ Datos Xtream\n✔ Link M3U",
+        reply_markup=teclado
+    )
+
+# -------- BOTONES -------- #
+
+async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    await query.message.reply_text(
+        "Formato Xtream:\n\n"
+        "servidor: http://example.com\n"
+        "puerto: 8080\n"
+        "usuario: user\n"
+        "contraseña: pass\n\n"
+        "O envía un link M3U"
+    )
+
+# -------- CHECK -------- #
+
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = update.message.text.strip()
+
+    # =========================
+    # 🔵 M3U → CONVERTIR A XTREAM
+    # =========================
+    if texto.startswith("http") and "m3u" in texto:
+        try:
+            parsed = urlparse(texto)
+            query = parse_qs(parsed.query)
+
+            servidor = parsed.hostname
+            puerto = parsed.port if parsed.port else "80"
+            usuario = query.get("username", [None])[0]
+            contraseña = query.get("password", [None])[0]
+
+            if not usuario or not contraseña:
+                await update.message.reply_text("❌ M3U inválido")
+                return
+
+            resultado = obtener_datos(servidor, puerto, usuario, contraseña)
+            await update.message.reply_text(resultado)
+
+        except:
+            await update.message.reply_text("❌ Error procesando M3U")
+
+        return
+
+    # =========================
+    # 🔴 XTREAM DIRECTO
+    # =========================
+    try:
+        lineas = texto.split("\n")
+        datos = {}
+
+        for linea in lineas:
+            if ":" in linea:
+                clave, valor = linea.split(":", 1)
+                datos[clave.strip().lower()] = valor.strip()
+
+        servidor = limpiar_servidor(datos.get("servidor", ""))
+        puerto = datos.get("puerto")
+        usuario = datos.get("usuario")
+        contraseña = datos.get("contraseña")
+
+        if not all([servidor, puerto, usuario, contraseña]):
+            await update.message.reply_text("❌ Datos incompletos")
+            return
+
+        resultado = obtener_datos(servidor, puerto, usuario, contraseña)
+        await update.message.reply_text(resultado)
+
+    except:
+        await update.message.reply_text("❌ Error en formato")
 
 # -------- MAIN -------- #
 
@@ -155,5 +152,5 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(botones))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check))
 
-print("BOT IPTV PRO ACTIVO...")
+print("🔥 BOT IPTV PRO ACTIVO 🔥")
 app.run_polling()
