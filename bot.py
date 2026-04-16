@@ -44,81 +44,45 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
 
-    # 🔵 Detectar M3U
-    if texto.startswith("http") and "m3u" in texto:
-        await update.message.reply_text(
-            f"""
-📡 INFORMACIÓN DE LA CUENTA
-──────────────────────────
-servidor: Detectado
-tipo_linea: M3U
-estado: Activo (si carga)
-nota: No se pueden obtener más datos en M3U
-"""
-        )
-        return
-
-    # 🔴 Xtream Codes
+    # 🔵 Detectar M3U PRO
+if texto.startswith("http") and "m3u" in texto:
     try:
-        lineas = texto.split("\n")
-        datos = {}
+        url = texto.strip()
 
-        for linea in lineas:
-            clave, valor = linea.split(":", 1)
-            datos[clave.strip().lower()] = valor.strip()
+        # Extraer datos del link
+        from urllib.parse import urlparse, parse_qs
 
-        servidor = datos.get("servidor")
-        puerto = datos.get("puerto")
-        usuario = datos.get("usuario")
-        contraseña = datos.get("contraseña")
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
 
-        url = f"{servidor}:{puerto}/player_api.php?username={usuario}&password={contraseña}"
+        servidor = parsed.hostname
+        puerto = parsed.port if parsed.port else "80"
+        usuario = query.get("username", ["N/A"])[0]
+        contraseña = query.get("password", ["N/A"])[0]
 
-        r = requests.get(url, timeout=10)
-
-        if r.status_code != 200:
-            await update.message.reply_text("❌ Servidor no responde")
-            return
-
-        data = r.json()
-
-        user = data.get("user_info", {})
-        server = data.get("server_info", {})
-
-        estado = user.get("status", "Desconocido")
-
-        tipo_linea = "Premium"
-        if user.get("is_trial") == "1":
-            tipo_linea = "Trial"
-
-        # Formatear fechas bonito (dd/mm/yyyy)
-def fecha_bonita(timestamp):
-    try:
-        return datetime.fromtimestamp(int(timestamp)).strftime('%d/%m/%Y')
-    except:
-        return "N/A"
-
-respuesta = f"""
+        respuesta = f"""
 INFORMACION DE LA CUENTA
 ──────────────────────────
-servidor:           {servidor.replace('http://','').replace('https://','')}
+servidor:           {servidor}
 puerto:             {puerto}
 usuario:            {usuario}
 contraseña:         {contraseña}
-estado:             {estado}
-tipo_linea:         {tipo_linea if tipo_linea else "N/A"}
-fecha_inicio:       {fecha_bonita(user.get('created_at'))}
-expiracion:         {fecha_bonita(user.get('exp_date'))}
-conex_permitidas:   {user.get('max_connections')}
-conex_activas:      {user.get('active_cons')}
-hora_servidor:      {server.get('time_now')}
+estado:             N/A
+tipo_linea:         M3U
+fecha_inicio:       N/A
+expiracion:         N/A
+conex_permitidas:   N/A
+conex_activas:      N/A
+hora_servidor:      N/A
 ──────────────────────────
 """
 
         await update.message.reply_text(respuesta)
 
-    except Exception as e:
-        await update.message.reply_text("❌ Error en datos o formato")
+    except:
+        await update.message.reply_text("❌ Error al analizar M3U")
+
+    return
 
 # -------- MAIN -------- #
 
